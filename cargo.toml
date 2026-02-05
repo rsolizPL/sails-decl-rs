@@ -1,0 +1,6 @@
+[workspace]
+members = [
+  "sails-decl-core",
+  "sails-decl-cli"
+]
+resolver = "2"
