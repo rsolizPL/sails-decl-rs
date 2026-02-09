@@ -79,9 +79,11 @@ jobs:
         run: cargo build -p sails-decl-cli --release --target x86_64-pc-windows-msvc
 
       - name: Rename
+        shell: pwsh
         run: |
-          move target\\x86_64-pc-windows-msvc\\release\\sails-decl-rs.exe ^
-               target\\x86_64-pc-windows-msvc\\release\\sails-decl-rs.exe-x86_64-pc-windows-msvc
+          Move-Item `
+            "target/x86_64-pc-windows-msvc/release/sails-decl-rs.exe" `
+            "target/x86_64-pc-windows-msvc/release/sails-decl-rs.exe-x86_64-pc-windows-msvc"
 
       - name: Upload
         uses: softprops/action-gh-release@v2
