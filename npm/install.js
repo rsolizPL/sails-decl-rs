@@ -3,7 +3,8 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 
-const VERSION = "v0.1.0";
+const pkg = require("./package.json");
+const VERSION = `v${pkg.version}`;
 const REPO = "rsolizPL/sails-decl-rs";
 
 function targetTriple() {
