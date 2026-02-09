@@ -1,0 +1,22 @@
+{
+  "name": "sails-decl-rs",
+  "version": "0.1.0",
+  "description": "Rust-powered CLI for sails-decl",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rsolizPL/sails-decl-rs.git"
+  },
+  "bin": {
+    "sails-decl-rs": "bin/sails-decl-rs.js"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "os": ["darwin", "linux", "win32"],
+  "cpu": ["x64", "arm64"],
+  "files": [
+    "bin",
+    "install.js"
+  ]
+}

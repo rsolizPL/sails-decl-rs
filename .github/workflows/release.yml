@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    name: Linux (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        run: cargo install cross
+
+      - name: Build
+        run: cross build -p sails-decl-cli --release --target ${{ matrix.target }}
+
+      - name: Upload
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/${{ matrix.target }}/release/sails-decl-rs
+
+  build-macos:
+    name: macOS (${{ matrix.target }})
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-apple-darwin
+          - aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build -p sails-decl-cli --release --target ${{ matrix.target }}
+
+      - name: Rename
+        run: |
+          mv target/${{ matrix.target }}/release/sails-decl-rs \
+             target/${{ matrix.target }}/release/sails-decl-rs-${{ matrix.target }}
+
+      - name: Upload
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/${{ matrix.target }}/release/sails-decl-rs-${{ matrix.target }}
+
+  build-windows:
+    name: Windows (x86_64-pc-windows-msvc)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build
+        run: cargo build -p sails-decl-cli --release --target x86_64-pc-windows-msvc
+
+      - name: Rename
+        run: |
+          move target\\x86_64-pc-windows-msvc\\release\\sails-decl-rs.exe ^
+               target\\x86_64-pc-windows-msvc\\release\\sails-decl-rs.exe-x86_64-pc-windows-msvc
+
+      - name: Upload
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/x86_64-pc-windows-msvc/release/sails-decl-rs.exe-x86_64-pc-windows-msvc
