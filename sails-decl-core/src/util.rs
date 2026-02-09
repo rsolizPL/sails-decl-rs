@@ -122,6 +122,10 @@ pub fn ts_type_from_attribute(attribute: &ObjectLit) -> Option<AttributeTypeInfo
             span: Default::default(),
             kind: TsKeywordTypeKind::TsAnyKeyword,
         })),
+        Some("ref") => Some(TsType::TsKeywordType(TsKeywordType {
+            span: Default::default(),
+            kind: TsKeywordTypeKind::TsAnyKeyword,
+        })),
         Some(x) => parse_type_hint(x).ok(),
         None => None,
     }
@@ -158,4 +162,9 @@ pub fn find_module_exports(module: Script) -> Option<ObjectLit> {
 
         assign.right.as_object().cloned()
     })
+}
+
+pub struct EmittedCode {
+    pub code: String,
+    pub source_map: String,
 }

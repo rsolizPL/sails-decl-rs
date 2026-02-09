@@ -18,7 +18,7 @@ use swc_ecmascript::ast::{
     Expr, Ident, Lit, Str, TsInterfaceBody, TsPropertySignature, TsTypeAnn, TsTypeElement,
 };
 
-use crate::util::{find_module_exports, get_prop_as_str, ts_type_from_attribute};
+use crate::util::{EmittedCode, find_module_exports, get_prop_as_str, ts_type_from_attribute};
 #[derive(Debug)]
 pub enum GenDeclarationsError {
     ParseError,
@@ -147,12 +147,7 @@ pub fn gen_decl(code: String, model_name: String, file_path: Option<PathBuf>) ->
     })
 }
 
-pub struct ModelCode {
-    pub code: String,
-    pub source_map: String,
-}
-
-pub fn emit_with_source_map(decl: ModelDecl, output_dts_path: &PathBuf) -> ModelCode {
+pub fn emit_with_source_map(decl: ModelDecl, output_dts_path: &PathBuf) -> EmittedCode {
     let mut buf = Vec::new();
     let mut src_map_buf = Vec::new();
 
@@ -180,7 +175,7 @@ pub fn emit_with_source_map(decl: ModelDecl, output_dts_path: &PathBuf) -> Model
     sourcemap.to_writer(&mut map_buf).unwrap();
     let map_json = String::from_utf8(map_buf).unwrap();
 
-    ModelCode {
+    EmittedCode {
         code,
         source_map: map_json,
     }
