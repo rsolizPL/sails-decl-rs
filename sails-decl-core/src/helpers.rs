@@ -9,50 +9,70 @@ use swc_common::{
     errors::{ColorConfig, Handler},
 };
 use swc_ecma_codegen::text_writer::JsWriter;
-use swc_ecma_codegen::{Config, Emitter, to_code};
+use swc_ecma_codegen::{Config, Emitter};
 use swc_ecma_parser::{Lexer, Parser, StringInput, Syntax};
 use swc_ecmascript::ast::{
-    Expr, Ident, Lit, Script, Str, TsEntityName, TsKeywordType, TsPropertySignature, TsType, TsTypeAliasDecl, TsTypeAnn, TsTypeElement, TsTypeLit, TsTypeParamInstantiation, TsTypeRef
+    Expr, Ident, Lit, Module, Str, TsEntityName, TsKeywordType, TsPropertySignature, TsType, TsTypeAliasDecl, TsTypeAnn, TsTypeElement, TsTypeLit, TsTypeParamInstantiation, TsTypeRef
 };
 
+use crate::literal_declarations::{get_global_declarations, get_global_namespace_declarations, get_helper_object_interface, get_sails_object};
 use crate::util::{EmittedCode, find_module_exports, get_prop_as_str, ts_type_from_attribute};
 
-pub fn build_tree(helpers: &Vec<PathBuf>, cm: Lrc<SourceMap>) -> Vec<SailsDeclHelperTreeNode> {
+pub fn build_tree(
+    helpers: &[PathBuf],
+    helpers_folder: &PathBuf,
+    cm: Lrc<SourceMap>,
+) -> Vec<SailsDeclHelperTreeNode> {
+    // Initial pass: make sure we are only looking at paths relative to the root folder
+    let relative_paths: Vec<PathBuf> = helpers
+        .iter()
+        .filter_map(|p| p.strip_prefix(&helpers_folder).ok().map(|s| s.to_path_buf()))
+        .collect();
+
+    build_tree_recursive(&relative_paths, &helpers_folder, cm)
+}
+
+fn build_tree_recursive(
+    paths: &[PathBuf],
+    current_base: &PathBuf,
+    cm: Lrc<SourceMap>,
+) -> Vec<SailsDeclHelperTreeNode> {
     let mut nodes = Vec::new();
-    
-    let mut groups: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
-    for path in helpers {
-        if let Some(parent) = path.parent() {
-            groups.entry(parent.to_path_buf()).or_default().push(path.clone());
+    let mut groups: HashMap<String, Vec<PathBuf>> = HashMap::new();
+
+    // Group paths by their next immediate component
+    for path in paths {
+        if let Some(first) = path.components().next() {
+            let name = first.as_os_str().to_string_lossy().into_owned();
+            groups.entry(name).or_default().push(path.clone());
         }
     }
 
-    for path in helpers {
-        let name = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .map(normalize_name)
-            .unwrap_or_default();
+    for (name, paths_in_group) in groups {
+        let full_path = current_base.join(&name);
 
-        if path.is_dir() {
-            let subdirectory_contents: Vec<PathBuf> = groups
-                .iter()
-                .filter(|(parent, _)| parent.starts_with(path) && *parent != path)
-                .flat_map(|(_, files)| files.iter().cloned())
+        // Check if this group represents a single leaf node (the file itself)
+        // This happens when one of the paths in the group is exactly the 'name'
+        if paths_in_group.iter().any(|p| p.components().count() == 1) {
+            if full_path.extension().and_then(|s| s.to_str()) == Some("js") {
+                match get_helper_info(full_path, cm.clone()) {
+                    Ok(helper_info) => nodes.push(SailsDeclHelperTreeNode::Helper(helper_info)),
+                    Err(e) => eprintln!("Failed to parse helper: {:?}", e),
+                }
+            }
+        } else {
+            // Otherwise, it's a directory. Strip the prefix and recurse.
+            let sub_paths: Vec<PathBuf> = paths_in_group
+                .into_iter()
+                .filter_map(|p| p.strip_prefix(&name).ok().map(|s| s.to_path_buf()))
                 .collect();
 
-            let children = build_tree(&subdirectory_contents, cm.clone());
-            if !children.is_empty() {
-                nodes.push(SailsDeclHelperTreeNode::Directory(SailsDeclHelperDirectory { 
-                    name, 
-                    children 
+            if !sub_paths.is_empty() {
+                let children = build_tree_recursive(&sub_paths, &full_path, cm.clone());
+                nodes.push(SailsDeclHelperTreeNode::Directory(SailsDeclHelperDirectory {
+                    name: normalize_name(&name),
+                    children,
                 }));
-            }
-        } else if path.extension().and_then(|s| s.to_str()) == Some("js") {
-            // Pass a clone of the path to the helper parser
-            match get_helper_info(path.clone(), cm.clone()) {
-                Ok(helper_info) => nodes.push(SailsDeclHelperTreeNode::Helper(helper_info)),
-                Err(e) => eprintln!("Failed to parse helper at {}: {:?}", path.display(), e),
             }
         }
     }
@@ -73,6 +93,11 @@ fn normalize_name(name: &str) -> String {
         } else {
             result.push(c);
         }
+    }
+
+    // if result ends in .js, remove that
+    if result.ends_with(".js") {
+        result.truncate(result.len() - 3);
     }
 
     result
@@ -233,9 +258,9 @@ pub struct SailsDeclHelperTree {
 }
 
 impl SailsDeclHelperTree {
-    pub fn new(helpers: &Vec<PathBuf>, cm: Lrc<SourceMap>) -> Self {
+    pub fn new(helpers: &Vec<PathBuf>, helpers_folder: &PathBuf, cm: Lrc<SourceMap>) -> Self {
         SailsDeclHelperTree {
-            root: build_tree(helpers, cm),
+            root: build_tree(helpers, helpers_folder, cm),
         }
     }
 
@@ -354,19 +379,23 @@ pub fn gen_helpers_object_decl(tree: SailsDeclHelperTree) -> TsTypeAliasDecl {
     }
 }
 
-pub fn emit_helpers_with_sourcemap(helpers: &Vec<PathBuf>, output_dts_path: &PathBuf) -> EmittedCode {
+pub fn emit_helpers_with_sourcemap(helpers: &Vec<PathBuf>, helpers_folder: &PathBuf, output_dts_path: &PathBuf) -> EmittedCode {
     // 1. Create the master SourceMap that will hold ALL files
     let cm: Lrc<SourceMap> = Default::default();
 
     // 2. Build the tree, passing the shared 'cm'
     // You'll need to update build_tree and get_helper_info to accept &cm
-    let tree = SailsDeclHelperTree::new(helpers, cm.clone());
+    let tree = SailsDeclHelperTree::new(helpers, helpers_folder, cm.clone());
     let decl = gen_helpers_object_decl(tree);
 
-    let script = Script {
+    let module = Module {
         span: Default::default(),
         body: vec![
-            decl.into()
+            get_helper_object_interface().into(),
+            decl.into(),
+            get_sails_object().into(),
+            get_global_namespace_declarations().into(),
+            get_global_declarations().into(),
         ],
         shebang: None,
     };
@@ -384,7 +413,7 @@ pub fn emit_helpers_with_sourcemap(helpers: &Vec<PathBuf>, output_dts_path: &Pat
             wr: writer,
         };
 
-        emitter.emit_script(&script).unwrap();
+        emitter.emit_module(&module).unwrap();
     }
 
     let mut code = String::from_utf8(buf).expect("utf8");

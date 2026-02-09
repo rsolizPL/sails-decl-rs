@@ -111,11 +111,9 @@ fn run(
                 let new_path = models_types_dir.join(js_file.strip_prefix(&model_dir).unwrap());
                 let declaration_path = new_path.with_extension("d.ts");
                 let decl_code = sails_decl_core::model::emit_with_source_map(decl, &declaration_path);
-                // same relative path as the js file, but with .d.ts extension and in the types_dir
                 std::fs::create_dir_all(new_path.parent().unwrap()).expect("Failed to create directories for output file");
                 std::fs::write(&declaration_path, decl_code.code).expect("Failed to write declaration file");
                 std::fs::write(new_path.with_extension("d.ts.map"), decl_code.source_map).expect("Failed to write source map file");
-                // println!("Generated declaration for {} at {}", js_file.strip_prefix(&model_dir).unwrap().display(), new_path.strip_prefix(&types_dir).unwrap().display());
             }
             Err(e) => eprintln!("Error processing {}: {:?}", js_file.display(), e),
         }
@@ -141,9 +139,9 @@ fn run(
         })
         .collect::<Vec<_>>();
 
-    let emitted = sails_decl_core::helpers::emit_helpers_with_sourcemap(&helper_files, &types_dir.join("index.d.ts"));
-    std::fs::write(types_dir.join("index.d.ts"), emitted.code).expect("Failed to write helpers declaration file");
-    std::fs::write(types_dir.join("index.d.ts.map"), emitted.source_map).expect("Failed to write helpers source map file");
+    let emitted = sails_decl_core::helpers::emit_helpers_with_sourcemap(&helper_files, &helpers_dir, &types_dir.join("global.d.ts"));
+    std::fs::write(types_dir.join("global.d.ts"), emitted.code).expect("Failed to write helpers declaration file");
+    std::fs::write(types_dir.join("global.d.ts.map"), emitted.source_map).expect("Failed to write helpers source map file");
 
     let helpers_duration = helpers_start.elapsed();
 
