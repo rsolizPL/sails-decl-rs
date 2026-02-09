@@ -103,7 +103,7 @@ fn run(
     for js_file in js_files {
         let code = std::fs::read_to_string(&js_file).expect("Failed to read model file");
         let name = js_file.file_stem().unwrap().to_string_lossy().to_string();
-        match sails_decl_core::gen_decl_for_model(code, name) {
+        match sails_decl_core::model::gen_decl(code, name) {
             Ok(decl) => {
                 let decl_code = to_code(&decl);
                 // same relative path as the js file, but with .d.ts extension and in the types_dir
