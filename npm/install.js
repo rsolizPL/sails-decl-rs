@@ -27,6 +27,17 @@ function binaryName() {
 function download(url, dest) {
   return new Promise((resolve, reject) => {
     https.get(url, res => {
+      // Follow redirects (GitHub does this for release assets)
+      if ([301, 302, 307, 308].includes(res.statusCode)) {
+        const location = res.headers.location;
+        if (!location) {
+          reject(new Error("Redirect without location header"));
+          return;
+        }
+        download(location, dest).then(resolve).catch(reject);
+        return;
+      }
+
       if (res.statusCode !== 200) {
         reject(new Error(`Download failed: ${res.statusCode}`));
         return;
