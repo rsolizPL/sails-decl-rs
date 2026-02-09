@@ -1,20 +1,24 @@
 extern crate swc_common;
 extern crate swc_ecma_parser;
 
+use std::path::PathBuf;
+
+use swc_common::Spanned;
+use swc_common::source_map::{DefaultSourceMapGenConfig};
 use swc_common::sync::Lrc;
 use swc_common::{
     FileName, SourceMap,
     errors::{ColorConfig, Handler},
 };
+use swc_ecma_codegen::{Config, Emitter};
+use swc_ecma_codegen::text_writer::JsWriter;
 use swc_ecma_parser::{Parser, StringInput, Syntax, lexer::Lexer};
-use swc_ecmascript::ast::TsInterfaceDecl;
-use swc_ecmascript::ast::TsType::{self};
+use swc_ecmascript::ast::{Script, TsInterfaceDecl};
 use swc_ecmascript::ast::{
-    Expr, Ident, Lit, Str, TsInterfaceBody, TsKeywordType, TsKeywordTypeKind,
-    TsPropertySignature, TsTypeAnn, TsTypeElement,
+    Expr, Ident, Lit, Str, TsInterfaceBody, TsPropertySignature, TsTypeAnn, TsTypeElement,
 };
 
-use crate::util::{get_prop_as_str, parse_type_hint};
+use crate::util::{find_module_exports, get_prop_as_str, ts_type_from_attribute};
 #[derive(Debug)]
 pub enum GenDeclarationsError {
     ParseError,
@@ -24,14 +28,19 @@ pub enum GenDeclarationsError {
     SDTypeHintParseError,
 }
 
-pub fn gen_decl(
-    code: String,
-    model_name: String,
-) -> Result<TsInterfaceDecl, GenDeclarationsError> {
+pub struct ModelDecl {
+    interface: Script,
+    source_map: Lrc<SourceMap>,
+}
+
+pub fn gen_decl(code: String, model_name: String, file_path: Option<PathBuf>) -> Result<ModelDecl, GenDeclarationsError> {
     let cm: Lrc<SourceMap> = Default::default();
     let handler = Handler::with_tty_emitter(ColorConfig::Auto, true, false, Some(cm.clone()));
 
-    let file = cm.new_source_file(FileName::Anon.into(), code);
+    let file = cm.new_source_file(match file_path {
+        Some(path) => FileName::Real(path),
+        None => FileName::Anon,
+     }.into(), code);
 
     let lexer = Lexer::new(
         Syntax::Es(Default::default()),
@@ -57,29 +66,25 @@ pub fn gen_decl(
 
     let module = module_result.unwrap();
 
+    let module_exports_obj =
+        find_module_exports(module).ok_or(GenDeclarationsError::IsNotCommonJsModule)?;
+
     let mut elements: Vec<TsTypeElement> = vec![];
 
-    let module_exports_obj = module.body.iter().find_map(|item| {
-        let assign = item.as_expr()?.expr.as_assign()?;
-        let member = assign.left.as_simple()?.as_member()?;
-        
-        if member.obj.as_ident()?.sym != "module" || member.prop.as_ident()?.sym != "exports" {
-            return None;
-        }
+    let attributes_obj = module_exports_obj
+        .props
+        .iter()
+        .find_map(|prop| {
+            let _key_value_prop = prop.as_prop().and_then(|p| p.as_key_value())?;
+            let key_name = get_prop_as_str(&_key_value_prop.key)?;
 
-        assign.right.as_object().cloned()
-    }).ok_or(GenDeclarationsError::IsNotCommonJsModule)?;
+            if key_name != "attributes" {
+                return None;
+            }
 
-    let attributes_obj = module_exports_obj.props.iter().find_map(|prop| {
-        let _key_value_prop = prop.as_prop().and_then(|p| p.as_key_value())?;
-        let key_name = get_prop_as_str(&_key_value_prop.key)?;
-
-        if key_name != "attributes" {
-            return None;
-        }
-
-        _key_value_prop.value.as_object().cloned()
-    }).ok_or(GenDeclarationsError::InvalidModel)?;
+            _key_value_prop.value.as_object().cloned()
+        })
+        .ok_or(GenDeclarationsError::InvalidModel)?;
 
     for attribute in &attributes_obj.props {
         let attribute_pair = match attribute.as_prop().and_then(|p| p.as_key_value()) {
@@ -97,125 +102,86 @@ pub fn gen_decl(
             None => continue,
         };
 
-        let mut attribute_type: Option<&str> = None;
-        let mut attribute_type_hint: Option<&str> = None;
-        let mut attribute_required: bool = false;
-
-        for _attr_field in &_attr_value_obj.props {
-            let _attr_field_prop = match _attr_field.as_prop() {
-                Some(prop) => prop,
-                None => continue,
-            };
-
-            let attribute_pair = _attr_field_prop.as_key_value().unwrap();
-
-            let attribute_name = match get_prop_as_str(&attribute_pair.key) {
-                Some(name) => name,
-                None => continue,
-            };
-            let attribute_value = &attribute_pair.value;
-
-            match attribute_name {
-                "type" => {
-                    if attribute_value.is_lit() {
-                        let _lit = attribute_value.as_lit().unwrap();
-                        if _lit.is_str() {
-                            attribute_type = _lit.as_str().unwrap().value.as_str();
-                        }
-                    }
-                }
-                "required" => {
-                    if attribute_value.is_lit() {
-                        let _lit = attribute_value.as_lit().unwrap();
-                        if _lit.is_bool() {
-                            attribute_required = _lit.as_bool().unwrap().value;
-                        }
-                    }
-                }
-                "$SD-type-hint" => {
-                    if attribute_value.is_lit() {
-                        let _lit = attribute_value.as_lit().unwrap();
-                        if _lit.is_str() {
-                            attribute_type_hint = _lit.as_str().unwrap().value.as_str();
-                        }
-                    }
-                }
-                _ => {
-                    continue;
-                }
-            }
-        }
-
-        let type_annotation: Result<TsTypeAnn, ()> = match attribute_type_hint.or(attribute_type) {
-            Some("string") => Ok(TsTypeAnn {
-                span: Default::default(),
-                type_ann: Box::new(TsType::TsKeywordType(TsKeywordType {
-                    span: Default::default(),
-                    kind: TsKeywordTypeKind::TsStringKeyword,
-                })),
-            }),
-            Some("number") => Ok(TsTypeAnn {
-                span: Default::default(),
-                type_ann: Box::new(TsType::TsKeywordType(TsKeywordType {
-                    span: Default::default(),
-                    kind: TsKeywordTypeKind::TsNumberKeyword,
-                })),
-            }),
-            Some("boolean") => Ok(TsTypeAnn {
-                span: Default::default(),
-                type_ann: Box::new(TsType::TsKeywordType(TsKeywordType {
-                    span: Default::default(),
-                    kind: TsKeywordTypeKind::TsBooleanKeyword,
-                })),
-            }),
-            Some("json") => Ok(TsTypeAnn {
-                span: Default::default(),
-                type_ann: Box::new(TsType::TsKeywordType(TsKeywordType {
-                    span: Default::default(),
-                    kind: TsKeywordTypeKind::TsAnyKeyword,
-                })),
-            }),
-            Some(x) => parse_type_hint(x).map(|ty| TsTypeAnn {
-                span: Default::default(),
-                type_ann: Box::new(ty),
-            }),
+        let attribute_type_info = match ts_type_from_attribute(_attr_value_obj) {
+            Some(info) => info,
             None => continue,
         };
 
-        if type_annotation.is_err() {
-            return Err(GenDeclarationsError::SDTypeHintParseError);
-        }
-
-        if attribute_type.is_some() {
-            elements.push(TsTypeElement::TsPropertySignature(TsPropertySignature {
+        elements.push(TsTypeElement::TsPropertySignature(TsPropertySignature {
+            span: attribute_pair.key.span(),
+            readonly: false,
+            key: Box::new(Expr::Lit(Lit::Str(Str {
+                span: attribute_pair.key.span(),
+                value: _attr_key_ident.sym.as_str().into(),
+                raw: None,
+            }))),
+            computed: true,
+            optional: !attribute_type_info.required,
+            type_ann: Some(Box::new(TsTypeAnn {
                 span: Default::default(),
-                readonly: false,
-                key: Box::new(Expr::Lit(Lit::Str(Str {
-                    span: Default::default(),
-                    value: _attr_key_ident.sym.as_str().into(),
-                    raw: None,
-                }))),
-                computed: true,
-                optional: !attribute_required,
-                type_ann: Some(Box::new(type_annotation.unwrap())),
-            }));
-        }
+                type_ann: Box::new(attribute_type_info.ts_type),
+            })),
+        }));
     }
 
-    Ok(TsInterfaceDecl {
-        span: Default::default(),
-        id: Ident {
-            span: Default::default(),
-            ctxt: Default::default(),
-            sym: format!("{}__ModelDecl", model_name).into(),
-            optional: false,
-        },
-        declare: true,
-        type_params: None,
-        extends: vec![],
-        body: TsInterfaceBody {
-            span: Default::default(),
-            body: elements,
-        },
+    Ok(ModelDecl {
+        interface: Script { span: Default::default(), body: vec![
+            TsInterfaceDecl {
+                span: Default::default(),
+                id: Ident {
+                    span: Default::default(),
+                    ctxt: Default::default(),
+                    sym: format!("{}__ModelDecl", model_name).into(),
+                    optional: false,
+                },
+                declare: true,
+                type_params: None,
+                extends: vec![],
+                body: TsInterfaceBody {
+                    span: Default::default(),
+                    body: elements,
+                },
+            }.into()
+        ], shebang: None },
+        source_map: cm
     })
+}
+
+pub struct ModelCode {
+    pub code: String,
+    pub source_map: String,
+}
+
+pub fn emit_with_source_map(decl: ModelDecl, output_dts_path: &PathBuf) -> ModelCode {
+    let mut buf = Vec::new();
+    let mut src_map_buf = Vec::new();
+
+    {
+        let writer = JsWriter::new(decl.source_map.clone(), "\n", &mut buf, Some(&mut src_map_buf));
+        let mut emitter = Emitter {
+            cfg: Config::default().with_minify(false),
+            cm: decl.source_map.clone(),
+            comments: None,
+            wr: writer,
+        };
+
+        emitter.emit_script(&decl.interface).unwrap();
+    }
+
+    let code = String::from_utf8(buf).expect("utf8");
+    
+    // SWC builds the sourcemap internally based on the spans you provided
+    let mut sourcemap = decl.source_map.build_source_map(&src_map_buf, None, DefaultSourceMapGenConfig {});
+    let mut map_buf = Vec::new();
+    let dts_filename = output_dts_path
+        .file_name()
+        .map(|f| f.to_string_lossy().into_owned());
+    sourcemap.set_file(dts_filename);
+    sourcemap.to_writer(&mut map_buf).unwrap();
+    let map_json = String::from_utf8(map_buf).unwrap();
+
+    ModelCode {
+        code,
+        source_map: map_json,
+    }
 }

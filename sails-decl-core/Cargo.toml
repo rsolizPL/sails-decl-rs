@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-swc_common = {version = "18.0.1", features = ["tty-emitter"]}
+swc_common = {version = "18.0.1", features = ["tty-emitter", "sourcemap"]}
 swc_ecma_parser = {version = "33.0.1", features = ["typescript"]}
 swc_ecmascript = "52.0.0"
 swc_estree_ast = "18.0.0"
+swc_ecma_codegen = "23.0.0"

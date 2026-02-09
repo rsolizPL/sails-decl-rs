@@ -7,5 +7,3 @@ edition = "2024"
 clap = { version = "4.5.56", features = ["derive"] }
 glob = "0.3.3"
 sails-decl-core = { path = "../sails-decl-core" }
-swc_ecma_codegen = "23.0.0"
-
