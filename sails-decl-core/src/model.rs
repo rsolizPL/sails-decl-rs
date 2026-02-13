@@ -13,9 +13,9 @@ use swc_common::{
 use swc_ecma_codegen::{Config, Emitter};
 use swc_ecma_codegen::text_writer::JsWriter;
 use swc_ecma_parser::{Parser, StringInput, Syntax, lexer::Lexer};
-use swc_ecmascript::ast::{Script, TsInterfaceDecl};
 use swc_ecmascript::ast::{
-    Expr, Ident, Lit, Str, TsInterfaceBody, TsPropertySignature, TsTypeAnn, TsTypeElement,
+    Decl, ExportDecl, Expr, Ident, Lit, Module, ModuleItem, Str, TsInterfaceBody,
+    TsInterfaceDecl, TsPropertySignature, TsTypeAnn, TsTypeElement,
 };
 
 use crate::util::{EmittedCode, find_module_exports, get_prop_as_str, ts_type_from_attribute};
@@ -29,8 +29,12 @@ pub enum GenDeclarationsError {
 }
 
 pub struct ModelDecl {
-    interface: Script,
+    module: Module,
     source_map: Lrc<SourceMap>,
+}
+
+pub fn model_type_name(model_name: &str) -> String {
+    format!("{}__ModelDecl", model_name)
 }
 
 pub fn gen_decl(code: String, model_name: String, file_path: Option<PathBuf>) -> Result<ModelDecl, GenDeclarationsError> {
@@ -124,26 +128,35 @@ pub fn gen_decl(code: String, model_name: String, file_path: Option<PathBuf>) ->
         }));
     }
 
+    let interface_decl = TsInterfaceDecl {
+        span: Default::default(),
+        id: Ident {
+            span: Default::default(),
+            ctxt: Default::default(),
+            sym: model_type_name(&model_name).into(),
+            optional: false,
+        },
+        declare: true,
+        type_params: None,
+        extends: vec![],
+        body: TsInterfaceBody {
+            span: Default::default(),
+            body: elements,
+        },
+    };
+
     Ok(ModelDecl {
-        interface: Script { span: Default::default(), body: vec![
-            TsInterfaceDecl {
-                span: Default::default(),
-                id: Ident {
+        module: Module {
+            span: Default::default(),
+            body: vec![ModuleItem::ModuleDecl(
+                swc_ecmascript::ast::ModuleDecl::ExportDecl(ExportDecl {
                     span: Default::default(),
-                    ctxt: Default::default(),
-                    sym: format!("{}__ModelDecl", model_name).into(),
-                    optional: false,
-                },
-                declare: true,
-                type_params: None,
-                extends: vec![],
-                body: TsInterfaceBody {
-                    span: Default::default(),
-                    body: elements,
-                },
-            }.into()
-        ], shebang: None },
-        source_map: cm
+                    decl: Decl::TsInterface(Box::new(interface_decl)),
+                }),
+            )],
+            shebang: None,
+        },
+        source_map: cm,
     })
 }
 
@@ -160,7 +173,7 @@ pub fn emit_with_source_map(decl: ModelDecl, output_dts_path: &PathBuf) -> Emitt
             wr: writer,
         };
 
-        emitter.emit_script(&decl.interface).unwrap();
+        emitter.emit_module(&decl.module).unwrap();
     }
 
     let code = String::from_utf8(buf).expect("utf8");

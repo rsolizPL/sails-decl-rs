@@ -11,6 +11,29 @@ fn as_ident(sym: &str) -> Ident {
     }
 }
 
+pub fn import_named(module_name: &str, imported_items: Vec<&str>, type_only: bool) -> ModuleItem {
+    ModuleItem::ModuleDecl(swc_ecmascript::ast::ModuleDecl::Import(swc_ecmascript::ast::ImportDecl {
+        span: Default::default(),
+        specifiers: imported_items
+            .into_iter()
+            .map(|item| swc_ecmascript::ast::ImportSpecifier::Named(swc_ecmascript::ast::ImportNamedSpecifier {
+                span: Default::default(),
+                local: as_ident(item),
+                imported: None,
+                is_type_only: false,
+            }))
+            .collect(),
+        src: Box::new(swc_ecmascript::ast::Str {
+            span: Default::default(),
+            value: module_name.into(),
+            raw: None,
+        }),
+        type_only,
+        with: None,
+        phase: swc_ecmascript::ast::ImportPhase::Evaluation,
+    }))
+}
+
 pub fn get_helper_object_interface() -> TsInterfaceDecl {
     TsInterfaceDecl {
         span: Default::default(),
@@ -79,8 +102,91 @@ pub fn get_helper_object_interface() -> TsInterfaceDecl {
     }
 }
 
+pub(crate) struct SailsModelInfo {
+    pub name: String,
+    pub type_name: String,
+}
+
+fn is_valid_ident(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    let valid_first = first == '_' || first == '$' || first.is_ascii_alphabetic();
+    if !valid_first {
+        return false;
+    }
+    chars.all(|c| c == '_' || c == '$' || c.is_ascii_alphanumeric())
+}
+
+// declare interface SailsObjectModels {
+//   ModelName: ModelAccessor<ModelTypeName>;
+// }
+pub fn get_sails_object_models_interface(models: &[SailsModelInfo]) -> TsInterfaceDecl {
+    TsInterfaceDecl {
+        span: Default::default(),
+        id: as_ident("SailsObjectModels"),
+        declare: true,
+        type_params: None,
+        extends: vec![],
+        body: TsInterfaceBody {
+            span: Default::default(),
+            body: models
+                .iter()
+                .map(|model| {
+                    let (key, computed) = if is_valid_ident(&model.name) {
+                        (
+                            Box::new(swc_ecmascript::ast::Expr::Ident(as_ident(&model.name))),
+                            false,
+                        )
+                    } else {
+                        (
+                            Box::new(swc_ecmascript::ast::Expr::Lit(swc_ecmascript::ast::Lit::Str(
+                                swc_ecmascript::ast::Str {
+                                    span: Default::default(),
+                                    value: model.name.clone().into(),
+                                    raw: None,
+                                },
+                            ))),
+                            true,
+                        )
+                    };
+
+                    TsTypeElement::TsPropertySignature(TsPropertySignature {
+                        span: Default::default(),
+                        readonly: false,
+                        key,
+                        computed,
+                        optional: false,
+                        type_ann: Some(Box::new(TsTypeAnn {
+                            span: Default::default(),
+                            type_ann: Box::new(TsType::TsTypeRef(TsTypeRef {
+                                span: Default::default(),
+                                type_name: swc_ecmascript::ast::TsEntityName::Ident(as_ident(
+                                    "ModelAccessor",
+                                )),
+                                type_params: Some(Box::new(TsTypeParamInstantiation {
+                                    span: Default::default(),
+                                    params: vec![Box::new(TsType::TsTypeRef(TsTypeRef {
+                                        span: Default::default(),
+                                        type_name: swc_ecmascript::ast::TsEntityName::Ident(
+                                            as_ident(&model.type_name),
+                                        ),
+                                        type_params: None,
+                                    }))],
+                                })),
+                            })),
+                        })),
+                    })
+                })
+                .collect(),
+        },
+    }
+}
+
 // declare interface SailsObject {
-//     helpers: HelpersObject;
+//   helpers: HelpersObject;
+//   models: SailsObjectModels;
 // }
 pub fn get_sails_object() -> ExportDecl {
     ExportDecl {
@@ -93,72 +199,102 @@ pub fn get_sails_object() -> ExportDecl {
             extends: vec![],
             body: TsInterfaceBody {
                 span: Default::default(),
-                body: vec![TsTypeElement::TsPropertySignature(TsPropertySignature {
-                    span: Default::default(),
-                    readonly: false,
-                    key: Box::new(swc_ecmascript::ast::Expr::Ident(as_ident("helpers"))),
-                    computed: false,
-                    optional: false,
-                    type_ann: Some(Box::new(TsTypeAnn {
+                body: vec![
+                    TsTypeElement::TsPropertySignature(TsPropertySignature {
                         span: Default::default(),
-                        type_ann: Box::new(TsType::TsTypeRef(TsTypeRef {
+                        readonly: false,
+                        key: Box::new(swc_ecmascript::ast::Expr::Ident(as_ident("helpers"))),
+                        computed: false,
+                        optional: false,
+                        type_ann: Some(Box::new(TsTypeAnn {
                             span: Default::default(),
-                            type_name: swc_ecmascript::ast::TsEntityName::Ident(as_ident(
-                                "HelpersObject",
-                            )),
-                            type_params: None,
+                            type_ann: Box::new(TsType::TsTypeRef(TsTypeRef {
+                                span: Default::default(),
+                                type_name: swc_ecmascript::ast::TsEntityName::Ident(as_ident(
+                                    "HelpersObject",
+                                )),
+                                type_params: None,
+                            })),
                         })),
-                    })),
-                })],
+                    }),
+                    TsTypeElement::TsPropertySignature(TsPropertySignature {
+                        span: Default::default(),
+                        readonly: false,
+                        key: Box::new(swc_ecmascript::ast::Expr::Ident(as_ident("models"))),
+                        computed: false,
+                        optional: false,
+                        type_ann: Some(Box::new(TsTypeAnn {
+                            span: Default::default(),
+                            type_ann: Box::new(TsType::TsTypeRef(TsTypeRef {
+                                span: Default::default(),
+                                type_name: swc_ecmascript::ast::TsEntityName::Ident(as_ident(
+                                    "SailsObjectModels",
+                                )),
+                                type_params: None,
+                            })),
+                        })),
+                    }),
+                ],
             },
         })),
     }
 }
 
-// declare namespace NodeJS {
+// declare global {
+//   namespace NodeJS {
 //     interface Global {
-//         sails: SailsObject;
+//       sails: SailsObject;
 //     }
+//   }
 // }
 pub fn get_global_namespace_declarations() -> TsModuleDecl {
     TsModuleDecl {
         span: Default::default(),
         declare: true,
-        global: false,
-        namespace: true,
-        id: swc_ecmascript::ast::TsModuleName::Ident(as_ident("NodeJS")),
+        global: true,
+        namespace: false,
+        id: swc_ecmascript::ast::TsModuleName::Ident(as_ident("global")),
         body: Some(TsNamespaceBody::TsModuleBlock(TsModuleBlock {
             span: Default::default(),
-            body: vec![
-                TsInterfaceDecl {
+            body: vec![TsModuleDecl {
+                span: Default::default(),
+                declare: false,
+                global: false,
+                namespace: true,
+                id: swc_ecmascript::ast::TsModuleName::Ident(as_ident("NodeJS")),
+                body: Some(TsNamespaceBody::TsModuleBlock(TsModuleBlock {
                     span: Default::default(),
-                    id: as_ident("Global"),
-                    declare: false,
-                    type_params: None,
-                    extends: vec![],
-                    body: TsInterfaceBody {
+                    body: vec![TsInterfaceDecl {
                         span: Default::default(),
-                        body: vec![TsTypeElement::TsPropertySignature(TsPropertySignature {
+                        id: as_ident("Global"),
+                        declare: false,
+                        type_params: None,
+                        extends: vec![],
+                        body: TsInterfaceBody {
                             span: Default::default(),
-                            readonly: false,
-                            key: Box::new(swc_ecmascript::ast::Expr::Ident(as_ident("sails"))),
-                            computed: false,
-                            optional: false,
-                            type_ann: Some(Box::new(TsTypeAnn {
+                            body: vec![TsTypeElement::TsPropertySignature(TsPropertySignature {
                                 span: Default::default(),
-                                type_ann: Box::new(TsType::TsTypeRef(TsTypeRef {
+                                readonly: false,
+                                key: Box::new(swc_ecmascript::ast::Expr::Ident(as_ident("sails"))),
+                                computed: false,
+                                optional: false,
+                                type_ann: Some(Box::new(TsTypeAnn {
                                     span: Default::default(),
-                                    type_name: swc_ecmascript::ast::TsEntityName::Ident(as_ident(
-                                        "SailsObject",
-                                    )),
-                                    type_params: None,
+                                    type_ann: Box::new(TsType::TsTypeRef(TsTypeRef {
+                                        span: Default::default(),
+                                        type_name: swc_ecmascript::ast::TsEntityName::Ident(as_ident(
+                                            "SailsObject",
+                                        )),
+                                        type_params: None,
+                                    })),
                                 })),
-                            })),
-                        })],
-                    },
-                }
-                .into(),
-            ],
+                            })],
+                        },
+                    }
+                    .into()],
+                })),
+            }
+            .into()],
         })),
     }
 }
@@ -204,6 +340,67 @@ pub fn get_global_declarations() -> TsModuleDecl {
                     })),
                 }),
             )],
+        })),
+    }
+}
+
+// declare global {
+//   var ModelName: ModelAccessor<ModelTypeName>;
+// }
+pub fn get_global_model_accessors(models: &[SailsModelInfo]) -> TsModuleDecl {
+    let mut body: Vec<ModuleItem> = Vec::new();
+
+    for model in models {
+        if !is_valid_ident(&model.name) {
+            continue;
+        }
+
+        body.push(ModuleItem::Stmt(swc_ecmascript::ast::Stmt::Decl(
+            Decl::Var(Box::new(VarDecl {
+                span: Default::default(),
+                kind: VarDeclKind::Var,
+                declare: false,
+                decls: vec![VarDeclarator {
+                    span: Default::default(),
+                    name: Pat::Ident(BindingIdent {
+                        id: as_ident(&model.name),
+                        type_ann: Some(Box::new(TsTypeAnn {
+                            span: Default::default(),
+                            type_ann: Box::new(TsType::TsTypeRef(TsTypeRef {
+                                span: Default::default(),
+                                type_name: swc_ecmascript::ast::TsEntityName::Ident(as_ident(
+                                    "ModelAccessor",
+                                )),
+                                type_params: Some(Box::new(TsTypeParamInstantiation {
+                                    span: Default::default(),
+                                    params: vec![Box::new(TsType::TsTypeRef(TsTypeRef {
+                                        span: Default::default(),
+                                        type_name: swc_ecmascript::ast::TsEntityName::Ident(
+                                            as_ident(&model.type_name),
+                                        ),
+                                        type_params: None,
+                                    }))],
+                                })),
+                            })),
+                        })),
+                    }),
+                    init: None,
+                    definite: false,
+                }],
+                ctxt: Default::default(),
+            })),
+        )));
+    }
+
+    TsModuleDecl {
+        span: Default::default(),
+        declare: true,
+        global: true,
+        namespace: false,
+        id: swc_ecmascript::ast::TsModuleName::Ident(as_ident("global")),
+        body: Some(TsNamespaceBody::TsModuleBlock(TsModuleBlock {
+            span: Default::default(),
+            body,
         })),
     }
 }

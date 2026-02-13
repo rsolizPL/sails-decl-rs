@@ -103,17 +103,38 @@ fn run(
         model_dir.display()
     );
 
+    let mut model_imports: Vec<sails_decl_core::helpers::ModelImport> = Vec::new();
+
     for js_file in model_files {
         let code = std::fs::read_to_string(&js_file).expect("Failed to read model file");
         let name = js_file.file_stem().unwrap().to_string_lossy().to_string();
-        match sails_decl_core::model::gen_decl(code, name, Some(js_file.clone())) {
+        match sails_decl_core::model::gen_decl(code, name.clone(), Some(js_file.clone())) {
             Ok(decl) => {
+                let model_type_name = sails_decl_core::model::model_type_name(&name);
                 let new_path = models_types_dir.join(js_file.strip_prefix(&model_dir).unwrap());
                 let declaration_path = new_path.with_extension("d.ts");
                 let decl_code = sails_decl_core::model::emit_with_source_map(decl, &declaration_path);
                 std::fs::create_dir_all(new_path.parent().unwrap()).expect("Failed to create directories for output file");
                 std::fs::write(&declaration_path, decl_code.code).expect("Failed to write declaration file");
                 std::fs::write(new_path.with_extension("d.ts.map"), decl_code.source_map).expect("Failed to write source map file");
+
+                let mut import_path = declaration_path
+                    .strip_prefix(&types_dir)
+                    .unwrap_or(&declaration_path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                if let Some(stripped) = import_path.strip_suffix(".d.ts") {
+                    import_path = stripped.to_string();
+                }
+                if !import_path.starts_with('.') {
+                    import_path = format!("./{}", import_path);
+                }
+
+                model_imports.push(sails_decl_core::helpers::ModelImport {
+                    model_name: name,
+                    model_type_name,
+                    import_path,
+                });
             }
             Err(e) => eprintln!("Error processing {}: {:?}", js_file.display(), e),
         }
@@ -139,9 +160,29 @@ fn run(
         })
         .collect::<Vec<_>>();
 
-    let emitted = sails_decl_core::helpers::emit_helpers_with_sourcemap(&helper_files, &helpers_dir, &types_dir.join("global.d.ts"));
-    std::fs::write(types_dir.join("global.d.ts"), emitted.code).expect("Failed to write helpers declaration file");
-    std::fs::write(types_dir.join("global.d.ts.map"), emitted.source_map).expect("Failed to write helpers source map file");
+    let helpers_out = types_dir.join("helpers.d.ts");
+    let emitted_helpers = sails_decl_core::helpers::generate_sails_helpers(&helper_files, &helpers_dir, &helpers_out);
+    std::fs::write(&helpers_out, emitted_helpers.code).expect("Failed to write helpers declaration file");
+    let helpers_map_out = helpers_out.with_file_name(format!(
+        "{}.map",
+        helpers_out.file_name().unwrap().to_string_lossy()
+    ));
+    std::fs::write(helpers_map_out, emitted_helpers.source_map)
+        .expect("Failed to write helpers source map file");
+
+    let global_out = types_dir.join("global.d.ts");
+    let emitted_global = sails_decl_core::helpers::generate_global_declarations_file(
+        &model_imports,
+        "./helpers",
+        &global_out,
+    );
+    std::fs::write(&global_out, emitted_global.code).expect("Failed to write global declaration file");
+    let global_map_out = global_out.with_file_name(format!(
+        "{}.map",
+        global_out.file_name().unwrap().to_string_lossy()
+    ));
+    std::fs::write(global_map_out, emitted_global.source_map)
+        .expect("Failed to write global source map file");
 
     let helpers_duration = helpers_start.elapsed();
 

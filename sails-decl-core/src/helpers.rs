@@ -12,10 +12,14 @@ use swc_ecma_codegen::text_writer::JsWriter;
 use swc_ecma_codegen::{Config, Emitter};
 use swc_ecma_parser::{Lexer, Parser, StringInput, Syntax};
 use swc_ecmascript::ast::{
-    Expr, Ident, Lit, Module, Str, TsEntityName, TsKeywordType, TsPropertySignature, TsType, TsTypeAliasDecl, TsTypeAnn, TsTypeElement, TsTypeLit, TsTypeParamInstantiation, TsTypeRef
+    Decl, ExportDecl, Expr, Ident, Lit, Module, ModuleItem, Str, TsEntityName, TsKeywordType, TsPropertySignature, TsType, TsTypeAliasDecl, TsTypeAnn, TsTypeElement, TsTypeLit, TsTypeParamInstantiation, TsTypeRef
 };
 
-use crate::literal_declarations::{get_global_declarations, get_global_namespace_declarations, get_helper_object_interface, get_sails_object};
+use crate::literal_declarations::{
+    get_global_declarations, get_global_model_accessors, get_global_namespace_declarations,
+    get_helper_object_interface, get_model_accessor_interface, get_sails_object,
+    get_sails_object_models_interface, import_named, SailsModelInfo,
+};
 use crate::util::{EmittedCode, find_module_exports, get_prop_as_str, ts_type_from_attribute};
 
 pub fn build_tree(
@@ -379,7 +383,13 @@ pub fn gen_helpers_object_decl(tree: SailsDeclHelperTree) -> TsTypeAliasDecl {
     }
 }
 
-pub fn emit_helpers_with_sourcemap(
+pub struct ModelImport {
+    pub model_name: String,
+    pub model_type_name: String,
+    pub import_path: String,
+}
+
+pub fn generate_sails_helpers(
     helpers: &Vec<PathBuf>,
     helpers_folder: &PathBuf,
     output_dts_path: &PathBuf
@@ -395,11 +405,14 @@ pub fn emit_helpers_with_sourcemap(
     let module = Module {
         span: Default::default(),
         body: vec![
-            get_helper_object_interface().into(),
-            decl.into(),
-            get_sails_object().into(),
-            get_global_namespace_declarations().into(),
-            get_global_declarations().into(),
+            ModuleItem::ModuleDecl(swc_ecmascript::ast::ModuleDecl::ExportDecl(ExportDecl {
+                span: Default::default(),
+                decl: Decl::TsInterface(Box::new(get_helper_object_interface())),
+            })),
+            ModuleItem::ModuleDecl(swc_ecmascript::ast::ModuleDecl::ExportDecl(ExportDecl {
+                span: Default::default(),
+                decl: Decl::TsTypeAlias(Box::new(decl)),
+            })),
         ],
         shebang: None,
     };
@@ -440,5 +453,75 @@ pub fn emit_helpers_with_sourcemap(
     EmittedCode { 
         code, 
         source_map: source_map_json 
+    }
+}
+
+pub fn generate_global_declarations_file(
+    models: &[ModelImport],
+    helpers_import_path: &str,
+    output_dts_path: &PathBuf,
+) -> EmittedCode {
+    let cm: Lrc<SourceMap> = Default::default();
+
+    let model_info: Vec<SailsModelInfo> = models
+        .iter()
+        .map(|model| SailsModelInfo {
+            name: model.model_name.clone(),
+            type_name: model.model_type_name.clone(),
+        })
+        .collect();
+
+    let mut body: Vec<ModuleItem> = Vec::new();
+
+    body.push(import_named(helpers_import_path, vec!["HelpersObject"], true));
+
+    for model in models {
+        body.push(import_named(&model.import_path, vec![&model.model_type_name], true));
+    }
+
+    body.push(get_model_accessor_interface().into());
+    body.push(get_sails_object_models_interface(&model_info).into());
+    body.push(get_sails_object().into());
+    body.push(get_global_namespace_declarations().into());
+    body.push(get_global_declarations().into());
+    body.push(get_global_model_accessors(&model_info).into());
+
+    let module = Module {
+        span: Default::default(),
+        body,
+        shebang: None,
+    };
+
+    let mut buf = Vec::new();
+    let mut src_map_buf = Vec::new();
+
+    {
+        let writer = JsWriter::new(cm.clone(), "\n", &mut buf, Some(&mut src_map_buf));
+        let mut emitter = Emitter {
+            cfg: Config::default().with_minify(false),
+            cm: cm.clone(),
+            comments: None,
+            wr: writer,
+        };
+
+        emitter.emit_module(&module).unwrap();
+    }
+
+    let mut code = String::from_utf8(buf).expect("utf8");
+
+    let mut sourcemap = cm.build_source_map(&src_map_buf, None, DefaultSourceMapGenConfig {});
+    let dts_name = output_dts_path.file_name().map(|n| n.to_string_lossy().into_owned());
+    sourcemap.set_file(dts_name);
+
+    let mut map_buf = Vec::new();
+    sourcemap.to_writer(&mut map_buf).unwrap();
+    let source_map_json = String::from_utf8(map_buf).unwrap();
+
+    let map_file_name = format!("{}.map", output_dts_path.file_name().unwrap().to_str().unwrap());
+    code.push_str(&format!("\n//# sourceMappingURL={}", map_file_name));
+
+    EmittedCode {
+        code,
+        source_map: source_map_json,
     }
 }
