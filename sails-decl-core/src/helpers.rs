@@ -379,7 +379,11 @@ pub fn gen_helpers_object_decl(tree: SailsDeclHelperTree) -> TsTypeAliasDecl {
     }
 }
 
-pub fn emit_helpers_with_sourcemap(helpers: &Vec<PathBuf>, helpers_folder: &PathBuf, output_dts_path: &PathBuf) -> EmittedCode {
+pub fn emit_helpers_with_sourcemap(
+    helpers: &Vec<PathBuf>,
+    helpers_folder: &PathBuf,
+    output_dts_path: &PathBuf
+) -> EmittedCode {
     // 1. Create the master SourceMap that will hold ALL files
     let cm: Lrc<SourceMap> = Default::default();
 

@@ -1,8 +1,5 @@
 use swc_ecmascript::ast::{
-    BindingIdent, Decl, ExportDecl, Ident, ModuleItem, Pat, TsFnParam, TsInterfaceBody,
-    TsInterfaceDecl, TsMethodSignature, TsModuleBlock, TsModuleDecl, TsNamespaceBody,
-    TsPropertySignature, TsType, TsTypeAnn, TsTypeElement, TsTypeParam,
-    TsTypeParamDecl, TsTypeParamInstantiation, TsTypeRef, VarDecl, VarDeclKind, VarDeclarator,
+    BindingIdent, Decl, ExportDecl, Ident, ModuleItem, Pat, TsArrayType, TsFnParam, TsInterfaceBody, TsInterfaceDecl, TsKeywordType, TsKeywordTypeKind, TsMethodSignature, TsModuleBlock, TsModuleDecl, TsNamespaceBody, TsPropertySignature, TsType, TsTypeAnn, TsTypeElement, TsTypeParam, TsTypeParamDecl, TsTypeParamInstantiation, TsTypeRef, TsUnionOrIntersectionType, TsUnionType, VarDecl, VarDeclKind, VarDeclarator
 };
 
 fn as_ident(sym: &str) -> Ident {
@@ -208,5 +205,158 @@ pub fn get_global_declarations() -> TsModuleDecl {
                 }),
             )],
         })),
+    }
+}
+
+// interface ModelAccessor<T> {
+//   find(criteria: any): Promise<T[]>;
+//   findOne(criteria: any): Promise<T | undefined>;
+//   create(data: any): Promise<T>;
+// }
+pub fn get_model_accessor_interface() -> TsInterfaceDecl {
+    TsInterfaceDecl {
+        span: Default::default(),
+        id: as_ident("ModelAccessor"),
+        declare: true,
+        type_params: Some(Box::new(TsTypeParamDecl {
+            span: Default::default(),
+            params: vec![TsTypeParam {
+                span: Default::default(),
+                name: as_ident("T"),
+                is_in: false,
+                is_out: false,
+                is_const: false,
+                constraint: None,
+                default: None,
+            }],
+        })),
+        extends: vec![],
+        body: TsInterfaceBody {
+            span: Default::default(),
+            body: vec![
+                TsTypeElement::TsMethodSignature(TsMethodSignature {
+                    span: Default::default(),
+                    key: Box::new(swc_ecmascript::ast::Expr::Ident(as_ident("find"))),
+                    computed: false,
+                    optional: false,
+                    params: vec![TsFnParam::Ident(BindingIdent {
+                        id: as_ident("criteria"),
+                        type_ann: Some(Box::new(TsTypeAnn {
+                            span: Default::default(),
+                            type_ann: Box::new(TsType::TsKeywordType(TsKeywordType {
+                                span: Default::default(),
+                                kind: TsKeywordTypeKind::TsAnyKeyword,
+                            })),
+                        })),
+                    })],
+                    type_ann: Some(Box::new(TsTypeAnn {
+                        span: Default::default(),
+                        type_ann: Box::new(TsType::TsTypeRef(TsTypeRef {
+                            span: Default::default(),
+                            type_name: swc_ecmascript::ast::TsEntityName::Ident(as_ident(
+                                "Promise",
+                            )),
+                            type_params: Some(Box::new(TsTypeParamInstantiation {
+                                span: Default::default(),
+                                params: vec![Box::new(TsType::TsArrayType(TsArrayType {
+                                    span: Default::default(),
+                                    elem_type: Box::new(TsType::TsTypeRef(TsTypeRef {
+                                        span: Default::default(),
+                                        type_name: swc_ecmascript::ast::TsEntityName::Ident(
+                                            as_ident("T"),
+                                        ),
+                                        type_params: None,
+                                    })),
+                                }))],
+                            })),
+                        })),
+                    })),
+                    type_params: None,
+                }),
+                TsTypeElement::TsMethodSignature(TsMethodSignature {
+                    span: Default::default(),
+                    key: Box::new(swc_ecmascript::ast::Expr::Ident(as_ident("findOne"))),
+                    computed: false,
+                    optional: false,
+                    params: vec![TsFnParam::Ident(BindingIdent {
+                        id: as_ident("criteria"),
+                        type_ann: Some(Box::new(TsTypeAnn {
+                            span: Default::default(),
+                            type_ann: Box::new(TsType::TsKeywordType(TsKeywordType {
+                                span: Default::default(),
+                                kind: TsKeywordTypeKind::TsAnyKeyword,
+                            })),
+                        })),
+                    })],
+                    type_ann: Some(Box::new(TsTypeAnn {
+                        span: Default::default(),
+                        type_ann: Box::new(TsType::TsTypeRef(TsTypeRef {
+                            span: Default::default(),
+                            type_name: swc_ecmascript::ast::TsEntityName::Ident(as_ident(
+                                "Promise",
+                            )),
+                            type_params: Some(Box::new(TsTypeParamInstantiation {
+                                span: Default::default(),
+                                params: vec![Box::new(TsType::TsUnionOrIntersectionType(
+                                    TsUnionOrIntersectionType::TsUnionType(TsUnionType {
+                                        span: Default::default(),
+                                        types: vec![
+                                            Box::new(TsType::TsTypeRef(TsTypeRef {
+                                                span: Default::default(),
+                                                type_name: swc_ecmascript::ast::TsEntityName::Ident(
+                                                    as_ident("T"),
+                                                ),
+                                                type_params: None,
+                                            })),
+                                            Box::new(TsType::TsKeywordType(TsKeywordType {
+                                                span: Default::default(),
+                                                kind: TsKeywordTypeKind::TsUndefinedKeyword,
+                                            })),
+                                        ],
+                                    }),
+                                ))],
+                            })),
+                        })),
+                    })),
+                    type_params: None,
+                }),
+                TsTypeElement::TsMethodSignature(TsMethodSignature {
+                    span: Default::default(),
+                    key: Box::new(swc_ecmascript::ast::Expr::Ident(as_ident("create"))),
+                    computed: false,
+                    optional: false,
+                    params: vec![TsFnParam::Ident(BindingIdent {
+                        id: as_ident("data"),
+                        type_ann: Some(Box::new(TsTypeAnn {
+                            span: Default::default(),
+                            type_ann: Box::new(TsType::TsKeywordType(TsKeywordType {
+                                span: Default::default(),
+                                kind: TsKeywordTypeKind::TsAnyKeyword,
+                            })),
+                        })),
+                    })],
+                    type_ann: Some(Box::new(TsTypeAnn {
+                        span: Default::default(),
+                        type_ann: Box::new(TsType::TsTypeRef(TsTypeRef {
+                            span: Default::default(),
+                            type_name: swc_ecmascript::ast::TsEntityName::Ident(as_ident(
+                                "Promise",
+                            )),
+                            type_params: Some(Box::new(TsTypeParamInstantiation {
+                                span: Default::default(),
+                                params: vec![Box::new(TsType::TsTypeRef(TsTypeRef {
+                                    span: Default::default(),
+                                    type_name: swc_ecmascript::ast::TsEntityName::Ident(as_ident(
+                                        "T",
+                                    )),
+                                    type_params: None,
+                                }))],
+                            })),
+                        })),
+                    })),
+                    type_params: None,
+                }),
+            ],
+        },
     }
 }
